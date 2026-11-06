@@ -1,0 +1,30 @@
+{
+  "name": "romeid",
+  "private": true,
+  "version": "1.0.0",
+  "description": "RomeID — Unified Dual-Lane Identity, Portfolio & Portable Reputation on Rome Protocol",
+  "type": "module",
+  "scripts": {
+    "contracts:compile": "npm --prefix contracts run compile",
+    "contracts:test": "npm --prefix contracts run test",
+    "contracts:coverage": "npm --prefix contracts run coverage",
+    "deploy": "tsx scripts/deploy.ts",
+    "verify": "tsx scripts/verify.ts",
+    "seed": "tsx scripts/seed.ts",
+    "frontend:dev": "npm --prefix frontend run dev",
+    "frontend:build": "npm --prefix frontend run build"
+  },
+  "dependencies": {
+    "@rome-protocol/registry": "github:rome-protocol/rome-registry#v0.2.0",
+    "@rome-protocol/sdk": "github:rome-protocol/rome-sdk-ts#v0.4.0",
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.98.0",
+    "dotenv": "^16.4.5",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3"
+  }
+}

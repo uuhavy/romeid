@@ -1,0 +1,38 @@
+{
+  "name": "romeid-contracts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "RomeID unified dual-lane identity, portfolio, and employer attestation smart contracts for Rome Protocol",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "coverage": "hardhat coverage"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.2.0",
+    "@rome-protocol/registry": "github:rome-protocol/rome-registry#v0.2.0",
+    "@rome-protocol/sdk": "github:rome-protocol/rome-sdk-ts#v0.4.0",
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.98.0",
+    "dotenv": "^16.4.5",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "^2.0.8",
+    "@nomicfoundation/hardhat-ethers": "^3.0.8",
+    "@nomicfoundation/hardhat-network-helpers": "^1.0.12",
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@typechain/ethers-v6": "^0.5.1",
+    "@typechain/hardhat": "^9.1.0",
+    "@types/chai": "^4.3.19",
+    "@types/mocha": "^10.0.9",
+    "@types/node": "^22.10.0",
+    "chai": "^4.5.0",
+    "ethers": "^6.13.4",
+    "hardhat": "^2.22.19",
+    "solidity-coverage": "^0.8.14",
+    "ts-node": "^10.9.2",
+    "typechain": "^8.3.2",
+    "typescript": "^5.6.3"
+  }
+}

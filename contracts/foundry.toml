@@ -1,0 +1,16 @@
+# Generated via `rome preset foundry hadrian` + Solidity ^0.8.28 settings
+[profile.default]
+src = "src"
+out = "out"
+libs = ["node_modules"]
+solc_version = "0.8.28"
+optimizer = true
+optimizer_runs = 200
+evm_version = "cancun"
+
+[rpc_endpoints]
+rome-hadrian = "${HADRIAN_RPC_URL}"
+
+# Deploy note (from `rome preset foundry hadrian`):
+# forge script --skip-simulation --rpc-url rome-hadrian ...
+# (Rome's execution diverges from forge's local simulation; `forge create` and `cast` work as-is.)

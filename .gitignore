@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+contracts/node_modules/
+frontend/node_modules/
+
+# Environment & Secrets (NEVER commit keys)
+.env
+.env.*
+!.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Local Windows npm git override (do not commit to Linux CI / Vercel)
+.npmrc
+contracts/.npmrc
+frontend/.npmrc
+
+# Build & Coverage outputs
+contracts/cache/
+contracts/artifacts/
+contracts/coverage/
+contracts/coverage.json
+contracts/typechain-types/
+contracts/out/
+frontend/.next/
+frontend/out/
+.vercel/
+frontend/.vercel/
+
+# OS / Logs
+*.log
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
