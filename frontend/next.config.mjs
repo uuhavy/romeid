@@ -1,7 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  transpilePackages: ["@rome-protocol/sdk"],
   experimental: {
-    serverComponentsExternalPackages: ["@rome-protocol/registry"],
+    outputFileTracingIncludes: {
+      "/*": ["./node_modules/@rome-protocol/registry/**/*"],
+      "/**": ["./node_modules/@rome-protocol/registry/**/*"],
+    },
   },
   webpack: (config, { isServer }) => {
     if (!isServer) {

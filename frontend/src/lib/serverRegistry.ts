@@ -1,6 +1,6 @@
-import { getChain, getContracts, getTokens } from "@rome-protocol/registry";
 import type { Hex } from "viem";
 import deploymentsJson from "@/config/deployments.json";
+import registrySnapshot from "@/config/registry.generated.json";
 import type { ChainRuntimeConfig } from "./contracts";
 
 const DEFAULT_HADRIAN_CHAIN_ID = 200010;
@@ -11,32 +11,77 @@ interface SavedDeployment {
   AttestationRegistry?: string;
 }
 
-export function getServerChainConfig(): ChainRuntimeConfig {
+interface RawChainMeta {
+  chainId: number;
+  name: string;
+  network?: string;
+  status?: string;
+  rpcUrl: string;
+  explorerUrl: string;
+  romeEvmProgramId: string;
+  nativeCurrency: { name: string; symbol: string; decimals: number };
+  solana?: { cluster?: string; explorerUrl?: string; rpc?: string };
+}
+
+interface RawTokenMeta {
+  address?: string;
+  kind?: string;
+  mintId?: string;
+}
+
+interface SnapshotEntry {
+  chain?: RawChainMeta | null;
+  contracts?: Record<string, unknown>;
+  tokens?: RawTokenMeta[];
+}
+
+const nativeImport = new Function("specifier", "return import(specifier)") as (
+  specifier: string
+) => Promise<{
+  getChain: (id: number) => RawChainMeta | null;
+  getContracts: (id: number) => Record<string, unknown> | null;
+  getTokens: (id: number) => RawTokenMeta[] | null;
+}>;
+
+export async function getServerChainConfig(): Promise<ChainRuntimeConfig> {
   const chainId = Number(
     process.env.NEXT_PUBLIC_CHAIN_ID || process.env.CHAIN_ID || DEFAULT_HADRIAN_CHAIN_ID
   );
-  const chain = getChain(chainId) as {
-    chainId: number;
-    name: string;
-    network?: string;
-    status?: string;
-    rpcUrl: string;
-    explorerUrl: string;
-    romeEvmProgramId: string;
-    nativeCurrency: { name: string; symbol: string; decimals: number };
-    solana?: { cluster?: string; explorerUrl?: string; rpc?: string };
-  } | null;
+
+  let chain: RawChainMeta | null = null;
+  let registryContracts: Record<string, unknown> = {};
+  let tokens: RawTokenMeta[] = [];
+
+  // 1. Try live ESM @rome-protocol/registry at runtime first
+  try {
+    const reg = await nativeImport("@rome-protocol/registry");
+    const liveChain = reg.getChain(chainId);
+    if (liveChain) {
+      chain = liveChain;
+      registryContracts = (reg.getContracts(chainId) ?? {}) as Record<string, unknown>;
+      tokens = (reg.getTokens(chainId) ?? []) as RawTokenMeta[];
+    }
+  } catch {
+    // Serverless environment without traced ESM JSON files; use prebuild snapshot below
+  }
+
+  // 2. Fallback to build-time snapshot generated directly from @rome-protocol/registry
+  if (!chain) {
+    const chainsMap = (
+      registrySnapshot as unknown as { chains?: Record<string, SnapshotEntry> }
+    ).chains;
+    const snap = chainsMap?.[String(chainId)];
+    if (snap?.chain) {
+      chain = snap.chain;
+      registryContracts = snap.contracts ?? {};
+      tokens = snap.tokens ?? [];
+    }
+  }
 
   if (!chain) {
     throw new Error(`Chain ${chainId} not found in @rome-protocol/registry`);
   }
 
-  const registryContracts = (getContracts(chainId) ?? {}) as Record<string, unknown>;
-  const tokens = (getTokens(chainId) ?? []) as Array<{
-    address?: string;
-    kind?: string;
-    mintId?: string;
-  }>;
   const gasToken = tokens.find((t) => t.kind === "gas");
   const wusdc = tokens.find((t) => t.kind === "spl_wrapper" && t.mintId === gasToken?.mintId);
 

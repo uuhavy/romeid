@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const cfg = getServerChainConfig();
+    const cfg = await getServerChainConfig();
     const rpcCall = async (method: string, params: unknown[]) => {
       const res = await fetch(cfg.rpcUrl, {
         method: "POST",

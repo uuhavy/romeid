@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const config = getServerChainConfig();
+    const config = await getServerChainConfig();
     return NextResponse.json(config);
   } catch (err) {
     return NextResponse.json(

@@ -25,6 +25,7 @@ contracts/typechain-types/
 contracts/out/
 frontend/.next/
 frontend/out/
+frontend/src/config/registry.generated.json
 .vercel/
 frontend/.vercel/
 

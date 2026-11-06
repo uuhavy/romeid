@@ -25,7 +25,7 @@ export default async function PublicProfilePage({
 }: {
   params: { handle: string };
 }) {
-  const cfg = getServerChainConfig();
+  const cfg = await getServerChainConfig();
   const rawHandle = decodeURIComponent(params.handle || "").replace(/^@/, "").toLowerCase();
 
   const idAddr = cfg.contracts.identityRegistry;

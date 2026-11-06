@@ -12,12 +12,12 @@ export const metadata: Metadata = {
     "Link MetaMask and Phantom/Solflare to a single shared on-chain identity inside Solana's runtime, with verifiable work portfolios and portable employer reputation.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const initialConfig = getServerChainConfig();
+  const initialConfig = await getServerChainConfig();
 
   return (
     <html lang="en" className="dark">
