@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Shield, Link2, Briefcase, Award, LayoutDashboard, Wallet, LogOut, Sparkles } from "lucide-react";
+import { Shield, Link2, Briefcase, Award, LayoutDashboard, Wallet, LogOut, Sparkles, Rocket } from "lucide-react";
 import { useRomeApp } from "@/context/RomeAppContext";
 import { shortenHex } from "@/lib/contracts";
 
@@ -31,6 +31,7 @@ export function Navbar() {
     { href: "/link", label: "Link Wallet", icon: Link2 },
     { href: "/work", label: "Work Records", icon: Briefcase },
     { href: "/attest", label: "Attest", icon: Award },
+    { href: "/deploy", label: "Deploy", icon: Rocket },
   ];
 
   return (

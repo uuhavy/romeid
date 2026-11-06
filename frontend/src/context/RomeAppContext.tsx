@@ -72,17 +72,77 @@ interface RomeContextValue {
     forceLane?: ActiveLane;
     onStatus?: (msg: string) => void;
   }) => Promise<TxOutcome>;
+
+  // Browser-side contract override (for 1-click MetaMask deploy or Remix address paste)
+  saveRuntimeContracts: (contracts: {
+    identityRegistry: Hex;
+    workRegistry: Hex;
+    attestationRegistry: Hex;
+  }) => void;
 }
 
 const RomeAppContext = createContext<RomeContextValue | null>(null);
 
 function RomeInnerProvider({
-  config,
+  config: serverConfig,
   children,
 }: {
   config: ChainRuntimeConfig;
   children: React.ReactNode;
 }) {
+  const [runtimeContracts, setRuntimeContracts] = useState<{
+    identityRegistry: Hex | null;
+    workRegistry: Hex | null;
+    attestationRegistry: Hex | null;
+  } | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(`romeid_contracts_${serverConfig.chainId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw) as {
+          identityRegistry?: Hex;
+          workRegistry?: Hex;
+          attestationRegistry?: Hex;
+        };
+        if (parsed.identityRegistry && parsed.workRegistry && parsed.attestationRegistry) {
+          setRuntimeContracts({
+            identityRegistry: parsed.identityRegistry,
+            workRegistry: parsed.workRegistry,
+            attestationRegistry: parsed.attestationRegistry,
+          });
+        }
+      }
+    } catch {
+      // Ignore storage read errors
+    }
+  }, [serverConfig.chainId]);
+
+  const config = useMemo<ChainRuntimeConfig>(() => {
+    if (!runtimeContracts) return serverConfig;
+    return {
+      ...serverConfig,
+      contracts: {
+        identityRegistry: serverConfig.contracts.identityRegistry ?? runtimeContracts.identityRegistry,
+        workRegistry: serverConfig.contracts.workRegistry ?? runtimeContracts.workRegistry,
+        attestationRegistry:
+          serverConfig.contracts.attestationRegistry ?? runtimeContracts.attestationRegistry,
+      },
+    };
+  }, [serverConfig, runtimeContracts]);
+
+  const saveRuntimeContracts = useCallback(
+    (next: { identityRegistry: Hex; workRegistry: Hex; attestationRegistry: Hex }) => {
+      setRuntimeContracts(next);
+      try {
+        window.localStorage.setItem(`romeid_contracts_${serverConfig.chainId}`, JSON.stringify(next));
+      } catch {
+        // Ignore storage write errors
+      }
+    },
+    [serverConfig.chainId]
+  );
+
   const { address, isConnected: evmConnected, connector } = useAccount();
   const { connectAsync, connectors } = useConnect();
   const { disconnect } = useDisconnect();
@@ -334,6 +394,7 @@ function RomeInnerProvider({
     loadingProfile,
     refreshProfile,
     executeContractWrite,
+    saveRuntimeContracts,
   };
 
   return <RomeAppContext.Provider value={value}>{children}</RomeAppContext.Provider>;
