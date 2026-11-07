@@ -232,6 +232,26 @@ export default function DeployPage() {
             <span>{errorMsg}</span>
           </div>
         )}
+
+        {isAddress(idAddr) && (
+          <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 space-y-2">
+            <p className="text-xs font-semibold text-emerald-300">
+              Rome Arena Step 3 (&ldquo;Built on testnet&rdquo;) — Link to paste after testing both wallets:
+            </p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <code className="text-xs text-white break-all">
+                {explorerBase}address/{idAddr}
+              </code>
+              <button
+                type="button"
+                onClick={() => navigator.clipboard.writeText(`${explorerBase}address/${idAddr}`)}
+                className="inline-flex items-center gap-1 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-slate-950 hover:bg-emerald-400"
+              >
+                <Copy className="h-3.5 w-3.5" /> Copy Arena Link
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Active / Manual Contract Addresses Form */}

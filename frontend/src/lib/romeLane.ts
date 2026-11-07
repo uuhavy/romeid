@@ -4,12 +4,9 @@ import { Connection, PublicKey, type Transaction } from "@solana/web3.js";
 import { getWallets } from "@wallet-standard/app";
 import { createPublicClient, http, type Hex } from "viem";
 import {
-  buildCreatePdaCall,
-  isSyntheticProvisioned,
   submitRomeTx,
   submitRomeTxSolanaLane,
   submitRomeTxV1,
-  syntheticAddress,
   type LaneSigner,
 } from "@rome-protocol/sdk";
 import type { ChainRuntimeConfig } from "./contracts";
@@ -85,11 +82,12 @@ export async function sendEvmLaneTx(params: {
   provider: Eip1193Provider;
   from: Hex;
   to: Hex;
-  data: Hex;
+  data?: Hex;
+  value?: bigint;
   cfg: ChainRuntimeConfig;
   onStatus?: (msg: string) => void;
 }): Promise<TxOutcome> {
-  const { provider, from, to, data, cfg, onStatus } = params;
+  const { provider, from, to, data = "0x", value, cfg, onStatus } = params;
   onStatus?.(`Switching MetaMask to ${cfg.chainName} (${cfg.chainId})...`);
   await ensureEvmChain(provider, cfg);
 
@@ -98,6 +96,7 @@ export async function sendEvmLaneTx(params: {
     from,
     to,
     data,
+    ...(value !== undefined ? { value } : {}),
   })) as Hex;
 
   onStatus?.("Waiting for Rome EVM & Solana L1 confirmation...");
@@ -193,7 +192,6 @@ export async function sendSolanaLaneTx(params: {
 }): Promise<TxOutcome> {
   const { pubkey, walletName, signTransaction, to, data, cfg, onStatus } = params;
   const connection = new Connection(cfg.solana.rpc, "confirmed");
-  const synthetic = syntheticAddress(pubkey);
   const clusterSuffix =
     cfg.solana.cluster && cfg.solana.cluster !== "mainnet" && cfg.solana.cluster !== "mainnet-beta"
       ? `?cluster=${cfg.solana.cluster}`
@@ -211,15 +209,6 @@ export async function sendSolanaLaneTx(params: {
         programId: cfg.romeEvmProgramId,
         signer: wsSigner,
       };
-
-      const provisioned = await isSyntheticProvisioned(connection, cfg.romeEvmProgramId, synthetic);
-      if (!provisioned) {
-        onStatus?.("One-time activation: provisioning your Rome synthetic PDA...");
-        const created = await submitRomeTxV1(v1Deps, buildCreatePdaCall(synthetic));
-        if (created.receipt?.status !== "0x1") {
-          throw new Error(`Synthetic PDA provisioning did not succeed (${created.hash})`);
-        }
-      }
 
       onStatus?.("Signing Rome authorization & Solana v1 transaction...");
       const res = await submitRomeTxV1(v1Deps, { to, data });
@@ -273,6 +262,7 @@ export async function sendSolanaLaneTx(params: {
     {
       to,
       data,
+      autoProvision: false,
     }
   );
 

@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { encodeFunctionData, isAddress, type Hex } from "viem";
-import { Link2, ArrowRight, CheckCircle2, Clock, ShieldAlert, Wallet } from "lucide-react";
+import React, { useCallback, useEffect, useState } from "react";
+import { encodeFunctionData, formatEther, isAddress, parseEther, type Hex } from "viem";
+import { Link2, ArrowRight, CheckCircle2, Clock, ShieldAlert, Wallet, Fuel } from "lucide-react";
 import { useRomeApp } from "@/context/RomeAppContext";
 import {
   IDENTITY_REGISTRY_ABI,
@@ -48,6 +48,51 @@ export default function LinkWalletWizardPage() {
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [txError, setTxError] = useState<string | null>(null);
   const [txOutcome, setTxOutcome] = useState<TxOutcome | null>(null);
+
+  const [evmGasBal, setEvmGasBal] = useState<bigint | null>(null);
+  const [solSynthGasBal, setSolSynthGasBal] = useState<bigint | null>(null);
+
+  const refreshBalances = useCallback(async () => {
+    try {
+      const pub = makePublicClient(config);
+      if (evmAddress) {
+        setEvmGasBal(await pub.getBalance({ address: evmAddress }));
+      } else {
+        setEvmGasBal(null);
+      }
+      if (solanaSyntheticAddress) {
+        setSolSynthGasBal(await pub.getBalance({ address: solanaSyntheticAddress }));
+      } else {
+        setSolSynthGasBal(null);
+      }
+    } catch {
+      // ignore balance read errors
+    }
+  }, [config, evmAddress, solanaSyntheticAddress]);
+
+  useEffect(() => {
+    refreshBalances();
+  }, [refreshBalances, txOutcome]);
+
+  const handleFundSolanaSynthetic = async (targetSynthetic: Hex) => {
+    setTxError(null);
+    setTxOutcome(null);
+    try {
+      const outcome = await executeContractWrite({
+        to: targetSynthetic,
+        data: "0x",
+        value: parseEther("0.05"),
+        forceLane: "evm",
+        onStatus: setStatusMsg,
+      });
+      setTxOutcome(outcome);
+      await refreshBalances();
+    } catch (err) {
+      setTxError((err as Error).message || String(err));
+    } finally {
+      setStatusMsg(null);
+    }
+  };
 
   const idAddr = config.contracts.identityRegistry;
 
@@ -232,6 +277,11 @@ export default function LinkWalletWizardPage() {
             <p className="mt-1 font-mono text-xs text-white">
               {evmConnected && evmAddress ? shortenHex(evmAddress, 8) : "Not connected"}
             </p>
+            {evmGasBal !== null && (
+              <p className="mt-0.5 text-[11px] text-slate-400">
+                Gas Balance: {Number(formatEther(evmGasBal)).toFixed(4)} {config.nativeCurrency.symbol}
+              </p>
+            )}
           </div>
           {!evmConnected && (
             <button
@@ -243,7 +293,7 @@ export default function LinkWalletWizardPage() {
           )}
         </div>
 
-        <div className="rounded-2xl border border-purple-500/30 bg-[#111520] p-4 flex items-center justify-between">
+        <div className="rounded-2xl border border-purple-500/30 bg-[#111520] p-4 flex items-center justify-between gap-2">
           <div>
             <p className="text-xs font-semibold text-purple-300">Solana Lane (Phantom / Solflare)</p>
             <p className="mt-1 font-mono text-xs text-white">
@@ -254,17 +304,39 @@ export default function LinkWalletWizardPage() {
             {solanaSyntheticAddress && (
               <p className="font-mono text-[11px] text-slate-400">
                 Synthetic: {shortenHex(solanaSyntheticAddress, 6)}
+                {solSynthGasBal !== null && (
+                  <span className="ml-2 text-purple-200">
+                    ({Number(formatEther(solSynthGasBal)).toFixed(4)} {config.nativeCurrency.symbol})
+                  </span>
+                )}
               </p>
             )}
           </div>
-          {!solanaConnected && (
-            <button
-              onClick={connectSolana}
-              className="rounded-xl bg-purple-500 px-3.5 py-2 text-xs font-bold text-white"
-            >
-              Connect Solana
-            </button>
-          )}
+          <div className="flex flex-col items-end gap-1.5">
+            {!solanaConnected ? (
+              <button
+                onClick={connectSolana}
+                className="rounded-xl bg-purple-500 px-3.5 py-2 text-xs font-bold text-white"
+              >
+                Connect Solana
+              </button>
+            ) : (
+              evmConnected &&
+              solanaSyntheticAddress &&
+              (solSynthGasBal === null || solSynthGasBal < parseEther("0.01")) && (
+                <button
+                  type="button"
+                  disabled={Boolean(statusMsg)}
+                  onClick={() => handleFundSolanaSynthetic(solanaSyntheticAddress)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3 py-1.5 text-[11px] font-semibold text-amber-200 hover:bg-amber-500/25"
+                  title="Send 0.05 USDC gas on Hadrian from MetaMask to your Solana wallet's synthetic EVM address"
+                >
+                  <Fuel className="h-3.5 w-3.5" />
+                  Top Up 0.05 {config.nativeCurrency.symbol} Gas
+                </button>
+              )
+            )}
+          </div>
         </div>
       </div>
 
@@ -442,7 +514,21 @@ export default function LinkWalletWizardPage() {
                     )}
 
                     {isPending && (
-                      <div className="pt-1">
+                      <div className="pt-1 space-y-2">
+                        {solB58 &&
+                          evmConnected &&
+                          matchesConnectedSol &&
+                          (solSynthGasBal === null || solSynthGasBal < parseEther("0.01")) && (
+                            <button
+                              type="button"
+                              disabled={Boolean(statusMsg)}
+                              onClick={() => handleFundSolanaSynthetic(link.wallet as Hex)}
+                              className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3 py-2 text-xs font-semibold text-amber-200 hover:bg-amber-500/25"
+                            >
+                              <Fuel className="h-3.5 w-3.5" />
+                              1. Top Up 0.05 {config.nativeCurrency.symbol} Gas for Solana Lane (via MetaMask)
+                            </button>
+                          )}
                         {solB58 ? (
                           matchesConnectedSol ? (
                             <button

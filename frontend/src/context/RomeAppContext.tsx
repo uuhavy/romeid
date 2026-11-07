@@ -68,7 +68,8 @@ interface RomeContextValue {
   // Unified dual-lane contract execution
   executeContractWrite: (params: {
     to: Hex;
-    data: Hex;
+    data?: Hex;
+    value?: bigint;
     forceLane?: ActiveLane;
     onStatus?: (msg: string) => void;
   }) => Promise<TxOutcome>;
@@ -317,12 +318,14 @@ function RomeInnerProvider({
   const executeContractWrite = useCallback(
     async ({
       to,
-      data,
+      data = "0x",
+      value,
       forceLane,
       onStatus,
     }: {
       to: Hex;
-      data: Hex;
+      data?: Hex;
+      value?: bigint;
       forceLane?: ActiveLane;
       onStatus?: (msg: string) => void;
     }): Promise<TxOutcome> => {
@@ -343,6 +346,7 @@ function RomeInnerProvider({
           from: evmAddress,
           to,
           data,
+          value,
           cfg: config,
           onStatus,
         });
