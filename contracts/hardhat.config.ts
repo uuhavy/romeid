@@ -34,12 +34,42 @@ for (const chain of listChains()) {
 
 const config: HardhatUserConfig = {
   solidity: {
-    version: "0.8.28",
-    settings: {
-      evmVersion: "cancun",
-      optimizer: {
-        enabled: true,
-        runs: 200,
+    compilers: [
+      {
+        version: "0.8.28",
+        settings: {
+          evmVersion: "cancun",
+          viaIR: true,
+          metadata: {
+            bytecodeHash: "none",
+          },
+          optimizer: {
+            enabled: true,
+            runs: 1,
+          },
+        },
+      },
+    ],
+    overrides: {
+      "src/RomeIDHub.sol": {
+        version: "0.8.28",
+        settings: {
+          evmVersion: "paris",
+          viaIR: true,
+          metadata: {
+            bytecodeHash: "none",
+          },
+          optimizer: {
+            enabled: true,
+            runs: 1,
+            details: {
+              yul: true,
+              yulDetails: {
+                optimizerSteps: "dhfoDgvulfnTUtnIf:fDnTOcmu",
+              },
+            },
+          },
+        },
       },
     },
   },

@@ -104,15 +104,18 @@ Implemented in `AttestationRegistry.getReputation(uint256 profileId)` in $O(1)$ 
 
 ---
 
-## 4. Deployed Addresses (Hadrian Testnet — Chain ID `200010`)
+## 4. Deployed Addresses & Live Dual-Lane Verification (Hadrian Testnet — Chain ID `200010`)
 
 > All chain facts (`chainId`, `rpcUrl`, `explorerUrl`, `romeEvmProgramId`, `nativeCurrency`) are resolved dynamically at runtime from `@rome-protocol/registry` — never hardcoded.
 
-| Contract | Address | Deployment Tx |
+| Component | Address / Hash | Explorer Link |
 |---|---|---|
-| `IdentityRegistry` | `Populated in deployments/200010.json & .env on npm run deploy` | — |
-| `WorkRegistry` | `Populated in deployments/200010.json & .env on npm run deploy` | — |
-| `AttestationRegistry` | `Populated in deployments/200010.json & .env on npm run deploy` | — |
+| **Unified `RomeIDHub` (`IdentityRegistry` + `WorkRegistry` + `AttestationRegistry` ABIs)** | `0x00c781a8903fbd11624d04d70fbccc8e5252afca` | [Hadrian Explorer](https://via-hadrian.testnet.romeprotocol.xyz/address/0x00c781a8903fbd11624d04d70fbccc8e5252afca) |
+| **Deployment Tx (EVM + Solana L1)** | `0x0b9df18378a2f8745abae1699943fac2bcb8d85bf636f89c007b3100980d2121` | [Hadrian Tx](https://via-hadrian.testnet.romeprotocol.xyz/tx/0x0b9df18378a2f8745abae1699943fac2bcb8d85bf636f89c007b3100980d2121) · [Solana Devnet Tx](https://explorer.solana.com/tx/62KkafVdotQywvd37DnDgMhopZ7fooB9pM7H3wKdzxSi59G5ZucBA9JQfhxtjvRacCyj2yRZuk2kS1mARvc6WjrG?cluster=devnet) |
+| **EVM-Lane Tx #1 (`createProfile` `@romeid_pioneer`)** | `0x70302f6a169588240e35effe6cbfe73098fd8641e6f72f53c07e6346bf96b282` | [Hadrian Tx](https://via-hadrian.testnet.romeprotocol.xyz/tx/0x70302f6a169588240e35effe6cbfe73098fd8641e6f72f53c07e6346bf96b282) · [Solana Devnet Tx](https://explorer.solana.com/tx/2BF4xi8wfCPrtw2nw4ejcawoRzngL5CbLpukbj8FKDrFp7sF94wRPXNBye4EPLgi3Cz1qdGbbBwb6z6ctqWdgpVa?cluster=devnet) |
+| **EVM-Lane Tx #2 (`requestLink` to Solana Wallet)** | `0x2c4b16306afc12e7a093e5235c55dd8abc4e2610d5b726628da8382dca24eb2b` | [Hadrian Tx](https://via-hadrian.testnet.romeprotocol.xyz/tx/0x2c4b16306afc12e7a093e5235c55dd8abc4e2610d5b726628da8382dca24eb2b) · [Solana Devnet Tx](https://explorer.solana.com/tx/uw1Ci6cz6RNpjV5WUKWFd51vsZnGEyF6hiQJPuFShDVr1HBjd9zMVmRNdZBg4GVAEn1a9AHV5wPVFiAu8atKsGw?cluster=devnet) |
+| **Solana-Lane Tx (`BxLH17yv...hfoW3` -> Synthetic `0xb28ada...0d7d` via `relayV1`)** | `0x877fe7f9c6c7a4c3ac07dd7889b56ddc0914c6ad505d7870d197278d1d95a6f7` | [Hadrian Tx](https://via-hadrian.testnet.romeprotocol.xyz/tx/0x877fe7f9c6c7a4c3ac07dd7889b56ddc0914c6ad505d7870d197278d1d95a6f7) · [Solana Devnet Tx](https://explorer.solana.com/tx/2j6eYGU29foAvb47ToNUWVx8rbGKyfbBibPKcsyP7F8TCNYQnUSdMATfYx2hHZ5wefurUsGQCH9K3mtx26Yvp6m?cluster=devnet) |
+| **Live Public Profile UI** | `@romeid_pioneer` (Profile `#1`) | https://romeid.vercel.app/p/romeid_pioneer |
 
 ---
 

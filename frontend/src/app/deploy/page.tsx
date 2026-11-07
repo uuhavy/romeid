@@ -37,9 +37,16 @@ export default function DeployPage() {
     setStepMsg(`Deploying ${label} — confirm in MetaMask...`);
     const pub = makePublicClient(config);
     const gasPrice = await pub.getGasPrice();
-    const maxFeeHex = `0x${(((gasPrice * 13n) / 10n) || 1n).toString(16)}`;
-    // High gas ceiling (18M): Rome charges ONLY exact gas used
-    const gasHex = `0x${(18_000_000n).toString(16)}`;
+    const maxFeeHex = `0x${(((gasPrice * 12n) / 10n) || 1n).toString(16)}`;
+    let gasLimit = 120_000_000n;
+    try {
+      const est = await pub.estimateGas({ account: from, data: deployData });
+      const padded = (est * 13n) / 10n;
+      if (padded > 0n) gasLimit = padded;
+    } catch {
+      // Fallback ceiling (Rome charges only exact gas used)
+    }
+    const gasHex = `0x${gasLimit.toString(16)}`;
 
     const txHash = (await provider.request({
       method: "eth_sendTransaction",

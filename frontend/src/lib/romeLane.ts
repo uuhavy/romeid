@@ -4,6 +4,7 @@ import { Connection, PublicKey, type Transaction } from "@solana/web3.js";
 import { getWallets } from "@wallet-standard/app";
 import { createPublicClient, http, type Hex } from "viem";
 import {
+  relayV1,
   submitRomeTx,
   submitRomeTxSolanaLane,
   submitRomeTxV1,
@@ -199,29 +200,42 @@ export async function sendSolanaLaneTx(params: {
 
   const wsSigner = findWalletStandardSigner(walletName, pubkey, cfg.solana.cluster);
 
-  // Path A: Canonical v1 Solana lane (`submitRomeTxV1`) for wallets supporting Solana v1 wire signing (e.g. Solflare)
+  // Path A: Canonical v1 Solana lane (`submitRomeTxV1` or `relayV1` when wallet has 0 devnet SOL / rejects v1 wire)
   if (wsSigner) {
-    try {
-      const v1Deps = {
-        connection,
-        proxyUrl: cfg.rpcUrl,
-        chainId: cfg.chainId,
-        programId: cfg.romeEvmProgramId,
-        signer: wsSigner,
-      };
+    const v1Deps = {
+      connection,
+      proxyUrl: cfg.rpcUrl,
+      chainId: cfg.chainId,
+      programId: cfg.romeEvmProgramId,
+      signer: wsSigner,
+    };
 
-      onStatus?.("Signing Rome authorization & Solana v1 transaction...");
-      const res = await submitRomeTxV1(v1Deps, { to, data });
+    let solLamports = 0;
+    try {
+      solLamports = await connection.getBalance(pubkey);
+    } catch {
+      solLamports = 0;
+    }
+
+    try {
+      onStatus?.(
+        solLamports >= 10_000
+          ? "Signing Rome authorization & Solana v1 transaction..."
+          : "Signing Rome Ed25519 authorization (proxy relay — 0 SOL needed)..."
+      );
+      const res =
+        solLamports >= 10_000
+          ? await submitRomeTxV1(v1Deps, { to, data })
+          : await relayV1(v1Deps, { to, data });
       if (res.receipt?.status !== "0x1") {
-        throw new Error(
-          `Solana-lane call reverted or timed out (${res.hash})`
-        );
+        throw new Error(`Solana-lane call reverted or timed out (${res.hash})`);
       }
 
       const extra = await enrichSolanaSettlement(cfg, res.hash);
-      const sigs = res.signature
-        ? Array.from(new Set([res.signature, ...extra.solanaSignatures]))
-        : extra.solanaSignatures;
+      const sigs =
+        "signature" in res && res.signature
+          ? Array.from(new Set([res.signature, ...extra.solanaSignatures]))
+          : extra.solanaSignatures;
 
       return {
         lane: "solana",
@@ -232,14 +246,35 @@ export async function sendSolanaLaneTx(params: {
         route: `solana-v1-${res.route}`,
       };
     } catch (v1Err) {
-      // If a wallet on devnet (e.g. Phantom) rejects Solana v1 wire format, fall through to legacy `DoTxUnsigned` lane
-      if (!signTransaction) throw v1Err;
       const msg = String((v1Err as Error)?.message ?? v1Err).toLowerCase();
       if (msg.includes("user rejected") || msg.includes("cancelled") || msg.includes("canceled")) {
         throw v1Err;
       }
+      // If atomic v1 wire signing failed (e.g. Phantom on devnet), try relayV1 before legacy DoTxUnsigned
+      if (solLamports >= 10_000) {
+        try {
+          onStatus?.("Retrying via Rome v1 Ed25519 relay...");
+          const relayRes = await relayV1(v1Deps, { to, data });
+          if (relayRes.receipt?.status === "0x1") {
+            const extra = await enrichSolanaSettlement(cfg, relayRes.hash);
+            return {
+              lane: "solana",
+              evmTxHash: relayRes.hash,
+              romeExplorerUrl: `${cfg.explorerUrl}tx/${relayRes.hash}`,
+              solanaSignatures: extra.solanaSignatures,
+              solanaExplorerUrls: extra.solanaSignatures.map(
+                (s) => `${cfg.solana.explorerUrl}/tx/${s}${clusterSuffix}`
+              ),
+              route: `solana-v1-${relayRes.route}`,
+            };
+          }
+        } catch {
+          // Fall through to legacy DoTxUnsigned
+        }
+      }
+      if (!signTransaction) throw v1Err;
       onStatus?.(
-        "Wallet rejected Solana v1 format on devnet — falling back to legacy DoTxUnsigned Solana lane..."
+        "Falling back to legacy DoTxUnsigned Solana lane..."
       );
     }
   }

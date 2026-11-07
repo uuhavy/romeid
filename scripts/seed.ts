@@ -1,26 +1,46 @@
 import "dotenv/config";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Connection, Keypair } from "@solana/web3.js";
 import {
   createPublicClient,
   createWalletClient,
   encodeFunctionData,
+  formatEther,
   http,
   parseAbi,
+  parseEther,
   type Account,
   type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { getChain } from "@rome-protocol/registry";
 import {
-  buildCreatePdaCall,
-  isSyntheticProvisioned,
   pubkeyToBytes32,
+  relayV1,
   submitRomeTx,
   submitRomeTxV1,
   syntheticAddress,
 } from "@rome-protocol/sdk";
+
+async function fetchSolanaSettlement(rpcUrl: string, evmTxHash: string): Promise<string[]> {
+  try {
+    const res = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "rome_solanaTxForEvmTx",
+        params: [evmTxHash],
+      }),
+    });
+    const json = (await res.json()) as { result?: unknown };
+    return Array.isArray(json.result) ? (json.result as string[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 function makeNodeEip1193(account: Account, rpcUrl: string, chainId: number) {
   const pub = createPublicClient({ transport: http(rpcUrl) });
@@ -79,6 +99,11 @@ async function main() {
   const rpcUrl = process.env.PROXY_URL || chain.rpcUrl;
   const solanaRpc = process.env.SOLANA_RPC || chain.solana?.rpc || "https://api.devnet.solana.com";
   const explorerBase = (chain.explorerUrl || "").replace(/\/?$/, "/");
+  const solanaExplorerBase = (chain.solana?.explorerUrl || "https://explorer.solana.com").replace(/\/?$/, "");
+  const clusterQuery =
+    chain.solana?.cluster && chain.solana.cluster !== "mainnet-beta" && chain.solana.cluster !== "mainnet"
+      ? `?cluster=${chain.solana.cluster}`
+      : "";
 
   const deployFile = resolve(process.cwd(), "deployments", `${chainId}.json`);
   const deployed = existsSync(deployFile) ? JSON.parse(readFileSync(deployFile, "utf8")) : null;
@@ -101,8 +126,12 @@ async function main() {
   );
   const evmProvider = makeNodeEip1193(evmAccount, rpcUrl, chainId);
   const pub = createPublicClient({ transport: http(rpcUrl) });
+  const gasPrice = await pub.getGasPrice();
+
+  const e2eSummary: Record<string, unknown> = {};
 
   console.log(`Seeding E2E RomeID demo flow on ${chain.name} (${chainId})...`);
+  console.log(`EVM Wallet Balance: ${formatEther(await pub.getBalance({ address: evmAccount.address }))} ${chain.nativeCurrency.symbol}`);
 
   // 1. Create or resolve EVM profile
   let profileId = (await pub.readContract({
@@ -113,14 +142,8 @@ async function main() {
   })) as bigint;
 
   if (profileId === 0n) {
-    const suffix = Math.floor(Date.now() / 1000) % 100000;
-    const handle = `rome_builder_${suffix}`;
-    const meta = JSON.stringify({
-      displayName: "Marcus Aurelius",
-      bio: "Cross-VM Architect building dual-lane apps on Rome Protocol.",
-      role: "Senior Rust & Solidity Engineer",
-      skills: ["Solidity", "Solana CPI", "Rome EVM", "TypeScript"],
-    });
+    const handle = "romeid_pioneer";
+    const meta = '{"displayName":"Marcus Aurelius","role":"Cross-VM Builder","skills":["Solidity","Solana"]}';
     console.log(`\n1. Creating profile @${handle} from EVM lane (${evmAccount.address})...`);
     const tx1 = await submitRomeTx(evmProvider, {
       from: evmAccount.address,
@@ -128,11 +151,16 @@ async function main() {
       data: encodeFunctionData({
         abi: IDENTITY_ABI,
         functionName: "createProfile",
-        args: [handle, `data:application/json,${encodeURIComponent(meta)}`],
+        args: [handle, meta],
       }),
     });
     await pub.waitForTransactionReceipt({ hash: tx1 });
-    console.log(`   Confirmed: ${explorerBase}tx/${tx1}`);
+    const sol1 = await fetchSolanaSettlement(rpcUrl, tx1);
+    console.log(`   Confirmed EVM Tx : ${explorerBase}tx/${tx1}`);
+    if (sol1[0]) console.log(`   Solana Settlement: ${solanaExplorerBase}/tx/${sol1[0]}${clusterQuery}`);
+    e2eSummary.createProfileTx = tx1;
+    e2eSummary.createProfileSolanaSig = sol1[0] ?? null;
+
     profileId = (await pub.readContract({
       address: identityAddr,
       abi: IDENTITY_ABI,
@@ -143,7 +171,7 @@ async function main() {
     console.log(`\n1. Existing profile #${profileId} found for ${evmAccount.address}`);
   }
 
-  // 2 & 3. Optional Solana-lane link + confirm if ROME_SOLANA_KEY is configured
+  // 2 & 3. Solana-lane link + confirm if ROME_SOLANA_KEY is configured
   const rawSolKey = process.env.ROME_SOLANA_KEY;
   if (rawSolKey && rawSolKey.trim().startsWith("[")) {
     const solKeypair = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(rawSolKey)));
@@ -170,9 +198,43 @@ async function main() {
         }),
       });
       await pub.waitForTransactionReceipt({ hash: txLink });
-      console.log(`   LinkRequested: ${explorerBase}tx/${txLink}`);
+      const solLink = await fetchSolanaSettlement(rpcUrl, txLink);
+      console.log(`   LinkRequested EVM: ${explorerBase}tx/${txLink}`);
+      if (solLink[0]) console.log(`   Solana Settlement: ${solanaExplorerBase}/tx/${solLink[0]}${clusterQuery}`);
+      e2eSummary.requestLinkTx = txLink;
 
-      console.log(`\n3. Confirming link from Solana lane via submitRomeTxV1...`);
+      const confirmCall = {
+        to: identityAddr,
+        data: encodeFunctionData({
+          abi: IDENTITY_ABI,
+          functionName: "confirmLink",
+          args: [profileId],
+        }),
+      };
+
+      const estConfirm = await pub.estimateGas({
+        account: solSynthetic,
+        to: confirmCall.to,
+        data: confirmCall.data,
+      });
+      const neededSolWei = (estConfirm * 155n * gasPrice) / 100n + parseEther("0.015");
+      const solGasBal = await pub.getBalance({ address: solSynthetic });
+      if (solGasBal < neededSolWei) {
+        const topUpAmt = neededSolWei - solGasBal;
+        console.log(
+          `   Topping up ${formatEther(topUpAmt)} USDC Hadrian gas to Solana synthetic ${solSynthetic}...`
+        );
+        const topUpTx = await submitRomeTx(evmProvider, {
+          from: evmAccount.address,
+          to: solSynthetic,
+          value: topUpAmt,
+          data: "0x",
+        });
+        await pub.waitForTransactionReceipt({ hash: topUpTx });
+        console.log(`   Gas topped up    : ${explorerBase}tx/${topUpTx}`);
+      }
+
+      console.log(`\n3. Confirming link from Solana lane (${solKeypair.publicKey.toBase58()})...`);
       const connection = new Connection(solanaRpc, "confirmed");
       const v1Deps = {
         connection,
@@ -181,24 +243,30 @@ async function main() {
         programId: chain.romeEvmProgramId,
         signer: solKeypair,
       };
-      if (!(await isSyntheticProvisioned(connection, chain.romeEvmProgramId, solSynthetic))) {
-        const prov = await submitRomeTxV1(v1Deps, buildCreatePdaCall(solSynthetic));
-        if (prov.receipt?.status !== "0x1") {
-          throw new Error(`Synthetic provisioning failed: ${prov.hash}`);
-        }
+      let solLamports = 0;
+      try {
+        solLamports = await connection.getBalance(solKeypair.publicKey);
+      } catch {
+        solLamports = 0;
       }
-      const conf = await submitRomeTxV1(v1Deps, {
-        to: identityAddr,
-        data: encodeFunctionData({
-          abi: IDENTITY_ABI,
-          functionName: "confirmLink",
-          args: [profileId],
-        }),
-      });
+      const conf =
+        solLamports >= 10_000
+          ? await submitRomeTxV1(v1Deps, confirmCall)
+          : await relayV1(v1Deps, confirmCall);
       if (conf.receipt?.status !== "0x1") {
         throw new Error(`confirmLink via Solana lane failed: ${conf.hash}`);
       }
-      console.log(`   LinkConfirmed from Solana lane! EVM Tx: ${explorerBase}tx/${conf.hash}`);
+      const solConfSigs = await fetchSolanaSettlement(rpcUrl, conf.hash);
+      console.log(
+        `   LinkConfirmed (${conf.route})! EVM Tx: ${explorerBase}tx/${conf.hash}`
+      );
+      if (solConfSigs[0]) {
+        console.log(`   Solana Settlement: ${solanaExplorerBase}/tx/${solConfSigs[0]}${clusterQuery}`);
+      }
+      e2eSummary.confirmLinkSolanaLaneTx = conf.hash;
+      e2eSummary.confirmLinkSolanaSig = solConfSigs[0] ?? null;
+      e2eSummary.solanaWallet = solKeypair.publicKey.toBase58();
+      e2eSummary.solanaSyntheticAddress = solSynthetic;
     } else {
       console.log(`\n2-3. Solana wallet already linked to profile #${existingSolProfile}`);
     }
@@ -217,16 +285,20 @@ async function main() {
       functionName: "addWorkRecord",
       args: [
         profileId,
-        "Lead Rome Protocol Dual-Lane Integration",
-        "Architected shared-state Solidity registries serving both MetaMask and Solana wallets atomically.",
-        "https://github.com/rome-protocol",
-        nowSec - 86400n * 30n,
+        "Rome Dual-Lane Identity Hub",
+        "Unified EVM & Solana identity + reputation on Rome.",
+        "https://github.com/uuhavy/romeid",
+        nowSec - 86400n * 14n,
         nowSec,
       ],
     }),
   });
   await pub.waitForTransactionReceipt({ hash: txWork });
-  console.log(`   WorkRecordAdded: ${explorerBase}tx/${txWork}`);
+  const solWork = await fetchSolanaSettlement(rpcUrl, txWork);
+  console.log(`   WorkRecordAdded  : ${explorerBase}tx/${txWork}`);
+  if (solWork[0]) console.log(`   Solana Settlement: ${solanaExplorerBase}/tx/${solWork[0]}${clusterQuery}`);
+  e2eSummary.addWorkRecordTx = txWork;
+  e2eSummary.addWorkRecordSolanaSig = solWork[0] ?? null;
 
   const records = (await pub.readContract({
     address: workAddr,
@@ -236,35 +308,65 @@ async function main() {
   })) as ReadonlyArray<{ id: bigint }>;
   const latestRecordId = records[records.length - 1].id;
 
-  // 5. Optional employer attestation if ATTESTER_EVM_KEY is set
+  // 5. Employer attestation if ATTESTER_EVM_KEY is set
   const rawAttesterKey = process.env.ATTESTER_EVM_KEY;
   if (rawAttesterKey && /^(0x)?[0-9a-fA-F]{64}$/.test(rawAttesterKey.trim())) {
     const attAccount = privateKeyToAccount(
       (rawAttesterKey.trim().startsWith("0x") ? rawAttesterKey.trim() : `0x${rawAttesterKey.trim()}`) as Hex
     );
+    const attData = encodeFunctionData({
+      abi: ATTESTATION_ABI,
+      functionName: "attest",
+      args: [
+        profileId,
+        latestRecordId,
+        5,
+        "data:text/plain,Verified 5/5 Rome builder!",
+      ],
+    });
+    const estAtt = await pub.estimateGas({
+      account: attAccount.address,
+      to: attestationAddr,
+      data: attData,
+    });
+    const neededAttWei = (estAtt * 155n * gasPrice) / 100n + parseEther("0.015");
+    const attGasBal = await pub.getBalance({ address: attAccount.address });
+    if (attGasBal < neededAttWei) {
+      const topUpAmt = neededAttWei - attGasBal;
+      console.log(`   Topping up ${formatEther(topUpAmt)} USDC Hadrian gas to Attester ${attAccount.address}...`);
+      const topUpAttTx = await submitRomeTx(evmProvider, {
+        from: evmAccount.address,
+        to: attAccount.address,
+        value: topUpAmt,
+        data: "0x",
+      });
+      await pub.waitForTransactionReceipt({ hash: topUpAttTx });
+      console.log(`   Attester topped  : ${explorerBase}tx/${topUpAttTx}`);
+    }
     const attProvider = makeNodeEip1193(attAccount, rpcUrl, chainId);
     console.log(`\n5. Submitting 5-star employer attestation from ${attAccount.address}...`);
     const txAtt = await submitRomeTx(attProvider, {
       from: attAccount.address,
       to: attestationAddr,
-      data: encodeFunctionData({
-        abi: ATTESTATION_ABI,
-        functionName: "attest",
-        args: [
-          profileId,
-          latestRecordId,
-          5,
-          "data:text/plain,Exceptional execution shipping cross-VM infrastructure on Rome.",
-        ],
-      }),
+      data: attData,
     });
     await pub.waitForTransactionReceipt({ hash: txAtt });
+    const solAtt = await fetchSolanaSettlement(rpcUrl, txAtt);
     console.log(`   AttestationCreated: ${explorerBase}tx/${txAtt}`);
+    if (solAtt[0]) console.log(`   Solana Settlement : ${solanaExplorerBase}/tx/${solAtt[0]}${clusterQuery}`);
+    e2eSummary.attestTx = txAtt;
+    e2eSummary.attestSolanaSig = solAtt[0] ?? null;
   } else {
     console.log(`\n5. Set ATTESTER_EVM_KEY in .env (or use /attest in UI) to submit employer attestation.`);
   }
 
-  // 6. Read Reputation
+  // 6. Read Profile & Reputation
+  const prof = (await pub.readContract({
+    address: identityAddr,
+    abi: IDENTITY_ABI,
+    functionName: "getProfile",
+    args: [profileId],
+  })) as { handle: string };
   const rep = (await pub.readContract({
     address: attestationAddr,
     abi: ATTESTATION_ABI,
@@ -277,11 +379,23 @@ async function main() {
     distinctAttesters: bigint;
   };
 
-  console.log(`\n6. On-Chain Reputation for Profile #${profileId}:`);
+  const finalBal = await pub.getBalance({ address: evmAccount.address });
+  console.log(`\n6. On-Chain Reputation for Profile #${profileId} (@${prof.handle}):`);
   console.log(`   Score               : ${rep.score.toString()} / 1000`);
   console.log(`   Average Rating      : ${(Number(rep.averageRatingHundredths) / 100).toFixed(2)} / 5.00`);
   console.log(`   Active Attestations : ${rep.activeAttestations.toString()}`);
   console.log(`   Distinct Attesters  : ${rep.distinctAttesters.toString()}`);
+  console.log(`   Remaining Gas Bal   : ${formatEther(finalBal)} ${chain.nativeCurrency.symbol}`);
+
+  if (deployed) {
+    deployed.e2eVerification = {
+      profileId: profileId.toString(),
+      handle: prof.handle,
+      reputationScore: rep.score.toString(),
+      ...e2eSummary,
+    };
+    writeFileSync(deployFile, JSON.stringify(deployed, null, 2) + "\n");
+  }
 }
 
 main().catch((err) => {

@@ -1,9 +1,19 @@
 import "dotenv/config";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { createPublicClient, createWalletClient, formatEther, http, type Hex } from "viem";
+import {
+  createPublicClient,
+  createWalletClient,
+  encodeDeployData,
+  formatEther,
+  http,
+  parseEther,
+  type Abi,
+  type Hex,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { getChain, getContracts, getTokens } from "@rome-protocol/registry";
+import { buildRome1559Fees } from "@rome-protocol/sdk";
 
 interface ArtifactJson {
   abi: unknown[];
@@ -62,6 +72,7 @@ async function main() {
   }
 
   const rpcUrl = process.env.PROXY_URL || chain.rpcUrl;
+  const gasSymbol = chain.nativeCurrency.symbol;
   const explorerBase = (chain.explorerUrl || "").replace(/\/?$/, "/");
   const solanaExplorerBase = (chain.solana?.explorerUrl || "https://explorer.solana.com").replace(/\/?$/, "");
   const clusterQuery =
@@ -85,12 +96,17 @@ async function main() {
 
   const balanceWei = await pub.getBalance({ address: account.address });
   const gasPrice = await pub.getGasPrice();
+  const useUnifiedHub =
+    process.env.DEPLOY_MODULAR !== "1" &&
+    (process.env.DEPLOY_UNIFIED === "1" || balanceWei < parseEther("20"));
+
   console.log("==============================================================");
   console.log(`Deploying RomeID to ${chain.name} (chainId ${chain.chainId})`);
   console.log(`RPC URL       : ${rpcUrl}`);
   console.log(`Rome Program  : ${chain.romeEvmProgramId}`);
   console.log(`Deployer      : ${account.address}`);
   console.log(`Gas Balance   : ${formatEther(balanceWei)} ${chain.nativeCurrency.symbol}`);
+  console.log(`Deploy Mode   : ${useUnifiedHub ? "RomeIDHub (unified rent-optimized ABI)" : "Modular 3-contract suite"}`);
   console.log(`Registry Meta : ${Object.keys(getContracts(chainId) ?? {}).length} core contracts, ${(getTokens(chainId) ?? []).length} tokens`);
   console.log("==============================================================");
 
@@ -105,14 +121,38 @@ async function main() {
     console.log(`\n-> Deploying ${name}...`);
     const artifact = loadArtifact(name);
     const bytecode = (artifact.bytecode.startsWith("0x") ? artifact.bytecode : `0x${artifact.bytecode}`) as Hex;
-    // High fixed gas ceiling: Rome charges EXACT gas used (`rome-cli/src/core/actions.ts` pattern)
+    const deployData = encodeDeployData({
+      abi: artifact.abi as Abi,
+      bytecode,
+      args: args as readonly unknown[],
+    });
+
+    const curBal = await pub.getBalance({ address: account.address });
+    const latestBlock = await pub.getBlock({ blockTag: "latest" }).catch(() => null);
+    const fees = buildRome1559Fees({
+      baseFeePerGas: latestBlock?.baseFeePerGas ?? gasPrice,
+      suggestedPriorityFee: 0n,
+      gasPrice,
+    });
+    const maxFeePerGas = "maxFeePerGas" in fees ? fees.maxFeePerGas : (gasPrice * 11n) / 10n;
+
+    const est = await pub.estimateGas({ account: account.address, data: deployData });
+    let gasLimit = (est * 115n) / 100n;
+    const maxAffordableGas = ((curBal * 98n) / 100n) / maxFeePerGas;
+    if (gasLimit > maxAffordableGas && maxAffordableGas > est) {
+      gasLimit = maxAffordableGas;
+    }
+    console.log(
+      `   Estimated gas    : ${est.toString()} (limit ${gasLimit.toString()}, ~${formatEther(est * gasPrice)} ${gasSymbol})`
+    );
+
     const hash = await wallet.deployContract({
       abi: artifact.abi as never,
       bytecode,
       args: args as never,
       chain: null,
-      gas: 26_000_000n,
-      maxFeePerGas: (gasPrice * 3n) / 2n,
+      gas: gasLimit,
+      maxFeePerGas,
       maxPriorityFeePerGas: 0n,
     });
     const receipt = await pub.waitForTransactionReceipt({ hash });
@@ -121,6 +161,7 @@ async function main() {
     }
     const solanaTxs = await fetchSolanaSettlement(rpcUrl, hash);
     console.log(`   Address          : ${receipt.contractAddress}`);
+    console.log(`   Gas Used         : ${receipt.gasUsed.toString()}`);
     console.log(`   EVM Tx           : ${explorerBase}tx/${hash}`);
     if (solanaTxs.length > 0) {
       for (const sig of solanaTxs) {
@@ -136,15 +177,27 @@ async function main() {
     };
   }
 
-  const identity = await deployOne("IdentityRegistry");
-  const work = await deployOne("WorkRegistry", [identity.address]);
-  const attestation = await deployOne("AttestationRegistry", [identity.address, work.address]);
+  let identity: Awaited<ReturnType<typeof deployOne>>;
+  let work: Awaited<ReturnType<typeof deployOne>>;
+  let attestation: Awaited<ReturnType<typeof deployOne>>;
+
+  if (useUnifiedHub) {
+    const hub = await deployOne("RomeIDHub");
+    identity = hub;
+    work = hub;
+    attestation = hub;
+  } else {
+    identity = await deployOne("IdentityRegistry");
+    work = await deployOne("WorkRegistry", [identity.address]);
+    attestation = await deployOne("AttestationRegistry", [identity.address, work.address]);
+  }
 
   const record = {
     chainId: chain.chainId,
     chainName: chain.name,
     deployedAt: new Date().toISOString(),
     deployer: account.address,
+    architecture: useUnifiedHub ? "RomeIDHub" : "Modular",
     contracts: {
       IdentityRegistry: identity,
       WorkRegistry: work,
@@ -171,6 +224,7 @@ async function main() {
     chainId: chain.chainId,
     chainName: chain.name,
     deployedAt: record.deployedAt,
+    architecture: record.architecture,
     IdentityRegistry: identity.address,
     WorkRegistry: work.address,
     AttestationRegistry: attestation.address,
@@ -192,11 +246,13 @@ async function main() {
     writeFileSync(envPath, envText);
   }
 
+  const endBal = await pub.getBalance({ address: account.address });
   console.log("\n==============================================================");
   console.log("Deployment Complete!");
   console.log(`IdentityRegistry    : ${identity.address}`);
   console.log(`WorkRegistry        : ${work.address}`);
   console.log(`AttestationRegistry : ${attestation.address}`);
+  console.log(`Remaining Balance   : ${formatEther(endBal)} ${chain.nativeCurrency.symbol}`);
   console.log(`Saved deployment    : ${deployFile}`);
   console.log("==============================================================");
 }

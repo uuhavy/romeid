@@ -1,1 +1,16 @@
-{}
+{
+  "200010": {
+    "chainId": 200010,
+    "chainName": "Rome Hadrian",
+    "deployedAt": "2026-11-07T05:13:32.363Z",
+    "architecture": "RomeIDHub",
+    "IdentityRegistry": "0x00c781a8903fbd11624d04d70fbccc8e5252afca",
+    "WorkRegistry": "0x00c781a8903fbd11624d04d70fbccc8e5252afca",
+    "AttestationRegistry": "0x00c781a8903fbd11624d04d70fbccc8e5252afca",
+    "txHashes": {
+      "IdentityRegistry": "0x0b9df18378a2f8745abae1699943fac2bcb8d85bf636f89c007b3100980d2121",
+      "WorkRegistry": "0x0b9df18378a2f8745abae1699943fac2bcb8d85bf636f89c007b3100980d2121",
+      "AttestationRegistry": "0x0b9df18378a2f8745abae1699943fac2bcb8d85bf636f89c007b3100980d2121"
+    }
+  }
+}
